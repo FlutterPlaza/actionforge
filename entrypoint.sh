@@ -41,6 +41,13 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT SIGQUIT
 
+# ── Remove stale config from previous run (container restart) ────────────────
+if [[ -f .runner ]]; then
+  echo "Removing stale runner configuration..."
+  REMOVE_TOKEN=$(get_token "$REMOVE_URL")
+  ./config.sh remove --token "$REMOVE_TOKEN" 2>/dev/null || true
+fi
+
 # ── Register ─────────────────────────────────────────────────────────────────
 echo "Registering runner '${RUNNER_NAME}' with ${CONFIG_URL}..."
 REG_TOKEN=$(get_token "$TOKEN_URL")
