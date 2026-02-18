@@ -79,6 +79,7 @@ detect_os() {
   # Detect Linux distro
   DISTRO=""
   if [[ "$OS" == "linux" ]] && [[ -f /etc/os-release ]]; then
+    # shellcheck source=/dev/null
     DISTRO=$(. /etc/os-release && echo "${ID:-unknown}")
   fi
 
@@ -235,6 +236,7 @@ resolve_labels() {
 # ── Prompt for missing config ────────────────────────────────────────────────
 prompt_config() {
   # Load saved config if it exists
+  # shellcheck source=/dev/null
   [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
   if [[ -z "${GH_ORG:-}" ]]; then
@@ -414,13 +416,17 @@ teardown() {
   # Docker runners (check working directory first, then script directory)
   if [[ -f "${ACTIONFORGE_WORKDIR}/docker-compose.yml" ]]; then
     cd "$ACTIONFORGE_WORKDIR"
-    docker compose down 2>/dev/null && ok "Docker runners stopped" || true
+    if docker compose down 2>/dev/null; then
+      ok "Docker runners stopped"
+    fi
   else
     local kit_dir
     kit_dir="$(resolve_script_dir)"
     if [[ -f "${kit_dir}/docker-compose.yml" ]]; then
       cd "$kit_dir"
-      docker compose down 2>/dev/null && ok "Docker runners stopped" || true
+      if docker compose down 2>/dev/null; then
+        ok "Docker runners stopped"
+      fi
     fi
   fi
 
