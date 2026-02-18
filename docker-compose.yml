@@ -19,7 +19,14 @@ services:
       - GH_REPO=${GH_REPO:-}
       - GH_PAT=${GH_PAT}
       - RUNNER_LABELS=${RUNNER_LABELS:-ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,x64}
+      - MAX_RETRIES=${MAX_RETRIES:-5}
+      - FAIL_COOLDOWN=${FAIL_COOLDOWN:-300}
     restart: unless-stopped
+    # Wait up to 6h for a running job to finish before force-killing.
+    # Default is 10s — far too short for CI jobs. After SIGTERM, the runner
+    # finishes its current job, then exits. Docker sends SIGKILL only after
+    # this grace period expires.
+    stop_grace_period: 6h
     # Mount Docker socket if your CI workflows build Docker images
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

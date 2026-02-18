@@ -1,0 +1,74 @@
+# ============================================================================
+#  ActionForge — Test Workflow
+#  Runs unit tests, integration tests, and static analysis
+# ============================================================================
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run unit tests
+        run: ./tests/bats/bin/bats tests/unit/
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Lint setup.sh
+        run: shellcheck setup.sh
+
+      - name: Lint entrypoint.sh
+        run: shellcheck entrypoint.sh
+
+  integration-tests:
+    name: Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    # Only run when secrets are available:
+    #   - push to main (always has secrets)
+    #   - PRs from the same repo (not forks — forks cannot access secrets)
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Mask PAT in logs
+        if: env.GH_PAT != ''
+        run: echo "::add-mask::${GH_PAT}"
+        env:
+          GH_PAT: ${{ secrets.GH_PAT_TEST }}
+
+      - name: Run integration tests
+        env:
+          GH_PAT: ${{ secrets.GH_PAT_TEST }}
+          GH_ORG: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
+        run: ./tests/bats/bin/bats tests/integration/

@@ -216,6 +216,22 @@ check_prereqs() {
   ok "All prerequisites satisfied (curl, git, jq, docker, docker compose)"
 }
 
+# ── Resolve runner labels ─────────────────────────────────────────────────
+# Dynamic labels based on install mode
+# Docker mode always uses Linux labels (containers are Linux regardless of host OS)
+# Bare mode uses the host OS labels
+resolve_labels() {
+  if [[ -z "${RUNNER_LABELS:-}" ]]; then
+    if [[ "$MODE" == "docker" ]]; then
+      RUNNER_LABELS="ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,x64"
+    elif [[ "$OS" == "osx" ]]; then
+      RUNNER_LABELS="macos-latest,macos-14,self-hosted,macos,${ARCH}"
+    else
+      RUNNER_LABELS="ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,${ARCH}"
+    fi
+  fi
+}
+
 # ── Prompt for missing config ────────────────────────────────────────────────
 prompt_config() {
   # Load saved config if it exists
@@ -245,18 +261,7 @@ prompt_config() {
     RUNNER_COUNT="${input_count:-$RUNNER_COUNT}"
   fi
 
-  # Dynamic labels based on install mode
-  # Docker mode always uses Linux labels (containers are Linux regardless of host OS)
-  # Bare mode uses the host OS labels
-  if [[ -z "${RUNNER_LABELS:-}" ]]; then
-    if [[ "$MODE" == "docker" ]]; then
-      RUNNER_LABELS="ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,x64"
-    elif [[ "$OS" == "osx" ]]; then
-      RUNNER_LABELS="macos-latest,macos-14,self-hosted,macos,${ARCH}"
-    else
-      RUNNER_LABELS="ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,${ARCH}"
-    fi
-  fi
+  resolve_labels
 
   # Save config (except PAT) for future runs
   cat > "$CONFIG_FILE" <<EOF
@@ -578,4 +583,6 @@ main() {
   echo ""
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
