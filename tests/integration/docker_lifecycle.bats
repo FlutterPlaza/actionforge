@@ -3,6 +3,12 @@
 # Requires: Docker running, GH_PAT environment variable for live tests
 
 COMPOSE_PROJECT="actionforge-test"
+PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
+
+setup() {
+  load "${PROJECT_ROOT}/tests/test_helper/bats-support/load"
+  load "${PROJECT_ROOT}/tests/test_helper/bats-assert/load"
+}
 
 _docker_available() {
   command -v docker &>/dev/null && docker info &>/dev/null 2>&1
