@@ -510,8 +510,17 @@ main() {
   fi
 
   if [[ "$MODE" == "teardown" ]]; then
-    prompt_config
-    resolve_urls
+    # Only prompt for config if bare-metal runners exist (needs PAT to deregister)
+    local runner_base
+    if [[ "$OS" == "osx" ]]; then
+      runner_base="$HOME/actions-runners"
+    else
+      runner_base="/opt/actions-runners"
+    fi
+    if [[ -d "$runner_base" ]]; then
+      prompt_config
+      resolve_urls
+    fi
     teardown
     exit 0
   fi
