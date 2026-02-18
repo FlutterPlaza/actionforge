@@ -32,11 +32,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── Install GitHub Actions runner ────────────────────────────────────────────
 ARG RUNNER_VERSION=2.321.0
-ARG RUNNER_ARCH=x64
 
 RUN useradd -m runner && \
     mkdir -p /home/runner/actions-runner && \
     cd /home/runner/actions-runner && \
+    ARCH="$(dpkg --print-architecture)" && \
+    if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then RUNNER_ARCH="arm64"; else RUNNER_ARCH="x64"; fi && \
     curl -sL -o runner.tar.gz \
       "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz" && \
     tar xzf runner.tar.gz && \
