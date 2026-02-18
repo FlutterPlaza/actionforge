@@ -1,0 +1,15 @@
+# Secrets — NEVER commit these
+.env
+*.conf
+*.token
+
+# Runner work directories
+_work/
+_diag/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/

@@ -1,0 +1,34 @@
+# ============================================================================
+#  ActionForge — Self-Hosted GitHub Actions Runners
+#  A FlutterPlaza Open-Source Product | https://flutterplaza.com
+# ============================================================================
+#  Usage:
+#    docker compose up -d --scale runner=4    # start 4 runners
+#    docker compose ps                        # check status
+#    docker compose logs -f                   # watch logs
+#    docker compose down                      # stop all
+# ============================================================================
+
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - GH_ORG=${GH_ORG}
+      - GH_REPO=${GH_REPO:-}
+      - GH_PAT=${GH_PAT}
+      - RUNNER_LABELS=${RUNNER_LABELS:-ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,x64}
+    restart: unless-stopped
+    # Mount Docker socket if your CI workflows build Docker images
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Resource limits per runner (adjust to your machine)
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
