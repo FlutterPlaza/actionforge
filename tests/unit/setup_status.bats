@@ -305,6 +305,52 @@ YAML
   assert_output --partial "3.3.0"
 }
 
+@test "detect_workflow_flutter skips GitHub expressions in flutter-version" {
+  # Workflow YAML where flutter-version is a GitHub expression (unresolvable)
+  local wf_yaml
+  wf_yaml=$(cat <<'YAML'
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{needs.get-flutter-version.outputs.flutter_version}}
+      - run: flutter test
+YAML
+)
+  local wf_b64
+  wf_b64=$(echo -n "$wf_yaml" | base64)
+
+  curl() {
+    local url="${*: -1}"
+    if [[ "$url" == *".fvm/fvm_config.json"* ]]; then
+      echo '{"message": "Not Found"}'
+    elif [[ "$url" == *".github/workflows"* ]] && [[ "$url" != *".yml"* ]]; then
+      echo '[{"name": "ci.yml"}]'
+    elif [[ "$url" == *"ci.yml"* ]]; then
+      echo "{\"content\": \"${WF_B64}\"}"
+    elif [[ "$url" == *"pubspec.yaml"* ]]; then
+      echo '{"message": "Not Found"}'
+    else
+      echo "{}"
+    fi
+  }
+  export -f curl
+  WF_B64="$wf_b64"
+  export WF_B64
+  GH_PAT="ghp_test"
+  GH_ORG="test-org"
+  GH_REPO="test-repo"
+  run detect_workflow_flutter
+  assert_success
+  # Should NOT use the expression literal — should fall back to stable
+  assert_output --partial "stable"
+  refute_output --partial "needs.get-flutter-version"
+}
+
 @test "detect_workflow_flutter falls back to stable when API returns nothing useful" {
   curl() {
     echo '{"message": "Not Found"}'

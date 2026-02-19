@@ -734,7 +734,7 @@ detect_workflow_flutter() {
           | sed "s/.*flutter-version:[[:space:]]*['\"]*//" \
           | sed "s/['\"].*//" \
           | tr -d '[:space:]') || true
-        if [[ -n "$fv" ]]; then
+        if [[ -n "$fv" ]] && [[ "$fv" != *'${'* ]]; then
           WORKFLOW_FLUTTER_VERSION="$fv"
           ok "Detected Flutter ${fv} from workflow ${wf_file} (flutter-action)"
           return 0
@@ -747,7 +747,7 @@ detect_workflow_flutter() {
           | sed "s/.*channel:[[:space:]]*['\"]*//" \
           | sed "s/['\"].*//" \
           | tr -d '[:space:]') || true
-        if [[ -n "$ch" ]]; then
+        if [[ -n "$ch" ]] && [[ "$ch" != *'${'* ]]; then
           WORKFLOW_FLUTTER_VERSION="$ch"
           ok "Detected Flutter channel '${ch}' from workflow ${wf_file} (flutter-action)"
           return 0
@@ -763,7 +763,7 @@ detect_workflow_flutter() {
           | sed "s/.*sdk:[[:space:]]*['\"]*//" \
           | sed "s/['\"].*//" \
           | tr -d '[:space:]') || true
-        if [[ -n "$ds" ]]; then
+        if [[ -n "$ds" ]] && [[ "$ds" != *'${'* ]]; then
           WORKFLOW_FLUTTER_VERSION="$ds"
           WORKFLOW_DART_ONLY=true
           ok "Detected Dart SDK ${ds} from workflow ${wf_file} (setup-dart)"
