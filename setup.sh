@@ -734,6 +734,7 @@ detect_workflow_flutter() {
           | sed "s/.*flutter-version:[[:space:]]*['\"]*//" \
           | sed "s/['\"].*//" \
           | tr -d '[:space:]') || true
+        # shellcheck disable=SC2016 # Literal match for ${ — intentionally not expanding
         if [[ -n "$fv" ]] && [[ "$fv" != *'${'* ]]; then
           WORKFLOW_FLUTTER_VERSION="$fv"
           ok "Detected Flutter ${fv} from workflow ${wf_file} (flutter-action)"
@@ -747,6 +748,7 @@ detect_workflow_flutter() {
           | sed "s/.*channel:[[:space:]]*['\"]*//" \
           | sed "s/['\"].*//" \
           | tr -d '[:space:]') || true
+        # shellcheck disable=SC2016
         if [[ -n "$ch" ]] && [[ "$ch" != *'${'* ]]; then
           WORKFLOW_FLUTTER_VERSION="$ch"
           ok "Detected Flutter channel '${ch}' from workflow ${wf_file} (flutter-action)"
@@ -763,6 +765,7 @@ detect_workflow_flutter() {
           | sed "s/.*sdk:[[:space:]]*['\"]*//" \
           | sed "s/['\"].*//" \
           | tr -d '[:space:]') || true
+        # shellcheck disable=SC2016
         if [[ -n "$ds" ]] && [[ "$ds" != *'${'* ]]; then
           WORKFLOW_FLUTTER_VERSION="$ds"
           WORKFLOW_DART_ONLY=true
@@ -1075,7 +1078,9 @@ teardown() {
         fi
       fi
     done
-    [[ "$OS" != "osx" ]] && sudo systemctl daemon-reload 2>/dev/null || true
+    if [[ "$OS" != "osx" ]]; then
+      sudo systemctl daemon-reload 2>/dev/null || true
+    fi
 
     for dir in "${runner_base}"/runner-*; do
       [[ -d "$dir" ]] || continue
@@ -1475,7 +1480,7 @@ status_bare_runners() {
       else
         # Fall back to old-style LaunchAgent log
         local runner_gh_label
-        runner_gh_label=$(ls -d "$HOME/Library/Logs/actions.runner."*".$(hostname)-${name}" 2>/dev/null | head -1 || true)
+        runner_gh_label=$(find "$HOME/Library/Logs" -maxdepth 1 -name "actions.runner.*.$(hostname)-${name}" -type d 2>/dev/null | head -1 || true)
         if [[ -n "$runner_gh_label" ]]; then
           log_file="${runner_gh_label}/stdout.log"
         fi
@@ -1487,8 +1492,8 @@ status_bare_runners() {
         log_file=""  # Will use journalctl below
       else
         # Fall back to _diag logs
-        log_file=$(ls -t "${dir}/_diag/Worker_"*.log 2>/dev/null | head -1 || true)
-        [[ -z "$log_file" ]] && log_file=$(ls -t "${dir}/_diag/Runner_"*.log 2>/dev/null | head -1 || true)
+        log_file=$(find "${dir}/_diag" -maxdepth 1 -name "Worker_*.log" -type f -print 2>/dev/null | sort -r | head -1 || true)
+        [[ -z "$log_file" ]] && log_file=$(find "${dir}/_diag" -maxdepth 1 -name "Runner_*.log" -type f -print 2>/dev/null | sort -r | head -1 || true)
       fi
     fi
 
@@ -1801,7 +1806,7 @@ add_runner() {
 
   # Update runner count in config
   local new_count
-  new_count=$(ls -d "${runner_base}"/runner-* 2>/dev/null | wc -l | tr -d ' ')
+  new_count=$(find "${runner_base}" -maxdepth 1 -name "runner-*" -type d 2>/dev/null | wc -l | tr -d ' ')
   if [[ -f "$CONFIG_FILE" ]]; then
     sed -i.bak "s/^RUNNER_COUNT=.*/RUNNER_COUNT=${new_count}/" "$CONFIG_FILE"
     rm -f "${CONFIG_FILE}.bak"
