@@ -50,6 +50,12 @@ actionforge
 
 Or as a single command: `brew install flutterplaza/tap/actionforge`
 
+**One-liner (fully non-interactive):**
+
+```bash
+actionforge --bare --org=MyOrg --repo=my-repo --pat=ghp_xxx --count=2 --yes
+```
+
 **macOS / Linux (manual):**
 
 ```bash
@@ -73,6 +79,7 @@ That's it. The script will:
 - Prompt you for your GitHub org name and PAT
 - Ask how many parallel runners you want (default: 2)
 - Let you choose Docker vs bare-metal mode
+- In bare-metal mode, enter a **live monitor** with controls to stop/manage runners
 
 ### Step 3 — There Is No Step 3
 
@@ -164,6 +171,8 @@ actionforge/
 ├── docker-compose.yml    ← Orchestrates multiple runners
 ├── Formula/
 │   └── actionforge.rb    ← Homebrew formula (reference copy)
+├── tests/
+│   └── unit/             ← BATS unit tests
 ├── .github/
 │   └── workflows/
 │       └── release.yml   ← Automated release + SHA256 computation
@@ -173,7 +182,52 @@ actionforge/
 
 ---
 
+## CLI Reference
+
+```
+Usage: actionforge [OPTIONS]
+
+Modes:
+  --docker              Use Docker-based isolated runner (recommended)
+  --bare                Install runner directly on this machine
+  --teardown            Remove all runners from this machine
+  --status, -s          Live runner dashboard (refreshes every 3s)
+
+Configuration (skip interactive prompts):
+  --org=NAME            GitHub org or username
+  --repo=NAME           Repository name (omit for org-wide)
+  --pat=TOKEN           GitHub Personal Access Token
+  --count=N             Number of parallel runners (default: 2)
+  --labels=LIST         Comma-separated runner labels
+  --yes, -y             Skip confirmation prompt
+
+Info:
+  --version, -v         Print version and exit
+  --help, -h            Print this help and exit
+```
+
+### Examples
+
+```bash
+# Interactive mode (prompts for everything)
+actionforge
+
+# One-liner: bare-metal, repo-scoped
+actionforge --bare --org=MyOrg --repo=my-repo --pat=ghp_xxx --count=2 --yes
+
+# One-liner: Docker, org-wide
+actionforge --docker --org=MyOrg --pat=ghp_xxx --count=4 --yes
+
+# Live dashboard
+actionforge --status
+
+# Full cleanup (deregisters from GitHub)
+actionforge --teardown
+```
+
 ## Common Operations
+
+### Docker Mode
 
 ```bash
 # Check runner status
@@ -190,7 +244,41 @@ docker compose up -d --scale runner=1
 
 # Stop all runners
 docker compose down
+```
 
+### Bare-Metal Mode
+
+After `actionforge --bare` finishes installing, a **live monitor** starts automatically:
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║          ActionForge — Runner Dashboard                          ║
+╚═══════════════════════════════════════════════════════════════════╝
+
+  Scope:   MyOrg/my-repo
+  Labels:  macos-latest,macos-14,self-hosted,macos,arm64
+  Updated: 2026-02-18 17:09:37    (Ctrl+C to exit)
+
+  --- Bare Metal Runners ---
+  RUNNER                               STATE          PID        FLUTTER
+  runner-1                             active         15119      3.27.0 (fvm)
+
+  ── Controls ──────────────────────────────────────────────
+  [1-1] stop runner   [a] stop all   [b] background   [q] quit
+```
+
+| Key | Action |
+|---|---|
+| `1`–`9` | Stop and deregister a specific runner |
+| `a` | Stop all runners and exit |
+| `b` | Background — exit monitor, runners keep running as services |
+| `q` | Quit monitor, runners keep running |
+
+You can also check on runners later with `actionforge --status`.
+
+### Cleanup
+
+```bash
 # Full cleanup (deregisters from GitHub)
 actionforge --teardown          # macOS/Linux
 .\setup.ps1 -Mode teardown     # Windows
@@ -222,7 +310,7 @@ Jobs in progress will fail and GitHub will show a red check. Pending jobs fall b
 Absolutely — that's actually the ideal setup. Run it on a beefy server and set `RUNNER_COUNT=8` or more.
 
 **Q: Do I need to keep the terminal open?**
-No. Docker runs in the background. Your runners survive terminal closes and reboots (via `restart: unless-stopped`).
+No. In Docker mode, runners survive terminal closes and reboots (via `restart: unless-stopped`). In bare-metal mode, runners are installed as system services (launchd on macOS, systemd on Linux) — press `b` or `q` in the monitor to exit while runners keep running.
 
 **Q: Does this work on Windows?**
 Yes! Run `.\setup.ps1` in an elevated PowerShell window. Docker Desktop on Windows runs Linux containers via WSL2, so the same `docker-compose.yml` works. For native Windows runners, use bare-metal mode.
