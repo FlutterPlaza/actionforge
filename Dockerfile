@@ -14,11 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     jq \
     git \
+    sudo \
     unzip \
     zip \
     wget \
     build-essential \
     software-properties-common \
+    # Build tools (engine / native compilation)
+    ninja-build \
+    pkg-config \
     # Node.js
     nodejs \
     npm \
@@ -34,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG RUNNER_VERSION=2.321.0
 
 RUN useradd -m runner && \
+    echo "runner ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     mkdir -p /home/runner/actions-runner && \
     cd /home/runner/actions-runner && \
     ARCH="$(dpkg --print-architecture)" && \
