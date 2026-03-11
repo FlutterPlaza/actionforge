@@ -14,10 +14,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
-      - GH_ORG=${GH_ORG}
-      - GH_REPO=${GH_REPO:-}
-      - GH_PAT=${GH_PAT}
       - RUNNER_LABELS=${RUNNER_LABELS:-ubuntu-latest,ubuntu-22.04,ubuntu-24.04,self-hosted,linux,x64}
       - MAX_RETRIES=${MAX_RETRIES:-5}
       - FAIL_COOLDOWN=${FAIL_COOLDOWN:-300}

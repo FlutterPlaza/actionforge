@@ -6,7 +6,8 @@
 #  Usage:
 #    actionforge                   # Interactive mode (prompts for everything)
 #    actionforge --docker          # Use Docker-based isolated runner
-#    actionforge --bare            # Install runner directly on this machine
+#    actionforge --bare            # Install runner directly on this machine (ephemeral)
+#    actionforge --bare --persistent  # Persistent runner (stays alive across jobs)
 #    actionforge --teardown        # Remove all runners from this machine
 #    actionforge --status          # Live runner dashboard
 #    actionforge --version         # Print version and exit
@@ -35,6 +36,8 @@ ACTIONFORGE_VERSION="1.4.2"
 RUNNER_VERSION="2.321.0"
 CONFIG_FILE="$HOME/.actionforge.conf"
 ACTIONFORGE_WORKDIR="$HOME/.actionforge"
+RUNNER_PERSISTENT=false
+DOCKER_PLATFORM=""
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 info()  { echo -e "${BLUE}ℹ ${NC} $*"; }
@@ -290,6 +293,7 @@ prompt_config() {
   local cli_pat="${GH_PAT:-}"
   local cli_count="${RUNNER_COUNT:-}"
   local cli_labels="${RUNNER_LABELS:-}"
+  local cli_persistent="${RUNNER_PERSISTENT:-}"
 
   # Load saved config if it exists
   # shellcheck source=/dev/null
@@ -301,6 +305,7 @@ prompt_config() {
   [[ -n "$cli_pat" ]] && GH_PAT="$cli_pat"
   [[ -n "$cli_count" ]] && RUNNER_COUNT="$cli_count"
   [[ -n "$cli_labels" ]] && RUNNER_LABELS="$cli_labels"
+  [[ -n "$cli_persistent" ]] && RUNNER_PERSISTENT="$cli_persistent"
 
   # Try to retrieve PAT from secure storage if not already set
   retrieve_pat
@@ -312,6 +317,18 @@ prompt_config() {
   if [[ -z "${GH_REPO+x}" ]]; then
     read -rp "$(echo -e "${YELLOW}Specific repo (leave blank for org-wide): ${NC}")" GH_REPO
     GH_REPO="${GH_REPO:-}"
+  fi
+
+  if [[ -z "${GH_PAT:-}" ]]; then
+    # Try gh CLI token first (avoids manual PAT entry)
+    if command -v gh &>/dev/null; then
+      local gh_token
+      gh_token=$(gh auth token 2>/dev/null || true)
+      if [[ -n "$gh_token" ]]; then
+        GH_PAT="$gh_token"
+        info "Using token from gh auth"
+      fi
+    fi
   fi
 
   if [[ -z "${GH_PAT:-}" ]]; then
@@ -342,6 +359,7 @@ GH_REPO="${GH_REPO}"
 GH_PAT="${GH_PAT}"
 RUNNER_COUNT=${RUNNER_COUNT}
 RUNNER_LABELS="${RUNNER_LABELS}"
+RUNNER_PERSISTENT=${RUNNER_PERSISTENT}
 EOF
   chmod 600 "$CONFIG_FILE"
   ok "Config saved to ${CONFIG_FILE}"
@@ -419,6 +437,11 @@ install_bare() {
     # Initial registration
     get_reg_token
 
+    local ephemeral_flag="--ephemeral"
+    if [[ "$RUNNER_PERSISTENT" == true ]]; then
+      ephemeral_flag=""
+    fi
+
     ./config.sh \
       --url "$CONFIG_URL" \
       --token "$REG_TOKEN" \
@@ -427,12 +450,16 @@ install_bare() {
       --work "_work" \
       --replace \
       --unattended \
-      --ephemeral
+      ${ephemeral_flag:+"$ephemeral_flag"}
 
     # Install service that runs the respawn wrapper (not run.sh directly)
     _install_respawn_service "$runner_dir" "$runner_name" "$i"
 
-    ok "runner-${i} is live and listening for jobs (auto-respawn enabled)"
+    if [[ "$RUNNER_PERSISTENT" == true ]]; then
+      ok "runner-${i} is live and listening for jobs (persistent mode)"
+    else
+      ok "runner-${i} is live and listening for jobs (auto-respawn enabled)"
+    fi
   done
 }
 
@@ -489,9 +516,10 @@ fi
 LABELS="${RUNNER_LABELS:-self-hosted}"
 RESPAWN_OUTER
 
-  # Inject the runner name (not single-quoted so it expands now)
+  # Inject the runner name and persistent flag (not single-quoted so they expand now)
   cat >> "${runner_dir}/respawn.sh" <<RESPAWN_NAME
 RUNNER_NAME="${runner_name}"
+RUNNER_PERSISTENT="${RUNNER_PERSISTENT}"
 RESPAWN_NAME
 
   cat >> "${runner_dir}/respawn.sh" <<'RESPAWN_INNER'
@@ -517,12 +545,8 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT SIGQUIT
 
-# ── Main respawn loop ──────────────────────────────────────────────────────
-while true; do
-  echo ""
-  echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Registering runner '${RUNNER_NAME}'..."
-
-  # Remove stale config from previous run
+# Helper: remove stale .runner config and re-register
+_register() {
   if [[ -f .runner ]]; then
     local_remove_token=$(curl -s -X POST \
       -H "Authorization: Bearer ${GH_PAT}" \
@@ -533,21 +557,22 @@ while true; do
     fi
   fi
 
-  # Get fresh registration token
   REG_TOKEN=$(curl -s -X POST \
     -H "Authorization: Bearer ${GH_PAT}" \
     -H "Accept: application/vnd.github+json" \
     "$TOKEN_URL" | jq -r '.token // empty')
+}
+
+if [[ "$RUNNER_PERSISTENT" == true ]]; then
+  # ── Persistent mode: register once, run continuously ───────────────────
+  echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Registering runner '${RUNNER_NAME}' (persistent)..."
+  _register
 
   if [[ -z "$REG_TOKEN" || "$REG_TOKEN" == "null" ]]; then
-    echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') ERROR: Failed to get registration token. Retrying in ${COOLDOWN}s..."
-    sleep "$COOLDOWN"
-    COOLDOWN=$((COOLDOWN * 2))
-    [[ $COOLDOWN -gt 300 ]] && COOLDOWN=300
-    continue
+    echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') ERROR: Failed to get registration token."
+    exit 1
   fi
 
-  # Configure
   ./config.sh \
     --url "$RUNNER_CONFIG_URL" \
     --token "$REG_TOKEN" \
@@ -555,21 +580,53 @@ while true; do
     --labels "$LABELS" \
     --work "_work" \
     --replace \
-    --unattended \
-    --ephemeral
+    --unattended
 
-  echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Runner registered. Waiting for jobs..."
-  COOLDOWN=10
+  echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Runner registered (persistent). Listening for jobs..."
 
-  # Run (blocks until job completes or runner exits)
   ./run.sh &
   RUNNER_PID=$!
   wait "$RUNNER_PID" || true
   RUNNER_PID=""
 
-  echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Job completed. Respawning in 5s..."
-  sleep 5
-done
+  echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Runner exited."
+else
+  # ── Ephemeral mode: respawn loop (re-registers after each job) ─────────
+  while true; do
+    echo ""
+    echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Registering runner '${RUNNER_NAME}'..."
+    _register
+
+    if [[ -z "$REG_TOKEN" || "$REG_TOKEN" == "null" ]]; then
+      echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') ERROR: Failed to get registration token. Retrying in ${COOLDOWN}s..."
+      sleep "$COOLDOWN"
+      COOLDOWN=$((COOLDOWN * 2))
+      [[ $COOLDOWN -gt 300 ]] && COOLDOWN=300
+      continue
+    fi
+
+    ./config.sh \
+      --url "$RUNNER_CONFIG_URL" \
+      --token "$REG_TOKEN" \
+      --name "$RUNNER_NAME" \
+      --labels "$LABELS" \
+      --work "_work" \
+      --replace \
+      --unattended \
+      --ephemeral
+
+    echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Runner registered. Waiting for jobs..."
+    COOLDOWN=10
+
+    ./run.sh &
+    RUNNER_PID=$!
+    wait "$RUNNER_PID" || true
+    RUNNER_PID=""
+
+    echo "$(date -u '+%Y-%m-%d %H:%M:%SZ') Job completed. Respawning in 5s..."
+    sleep 5
+  done
+fi
 RESPAWN_INNER
 
   chmod +x "${runner_dir}/respawn.sh"
@@ -1016,6 +1073,16 @@ RUNNER_LABELS=${RUNNER_LABELS}
 RUNNER_COUNT=${RUNNER_COUNT}
 EOF
   chmod 600 "${ACTIONFORGE_WORKDIR}/.env"
+
+  # Inject platform into docker-compose.yml if --platform was specified
+  if [[ -n "$DOCKER_PLATFORM" ]]; then
+    local compose_file="${ACTIONFORGE_WORKDIR}/docker-compose.yml"
+    # Add platform directive under the runner service
+    sed -i.bak "/^  runner:/a\\
+\\    platform: ${DOCKER_PLATFORM}" "$compose_file"
+    rm -f "${compose_file}.bak"
+    info "Docker platform: ${DOCKER_PLATFORM}"
+  fi
 
   cd "$ACTIONFORGE_WORKDIR"
 
@@ -1791,6 +1858,11 @@ add_runner() {
   # Register with GitHub
   get_reg_token
 
+  local ephemeral_flag="--ephemeral"
+  if [[ "$RUNNER_PERSISTENT" == true ]]; then
+    ephemeral_flag=""
+  fi
+
   ./config.sh \
     --url "$CONFIG_URL" \
     --token "$REG_TOKEN" \
@@ -1799,7 +1871,7 @@ add_runner() {
     --work "_work" \
     --replace \
     --unattended \
-    --ephemeral
+    ${ephemeral_flag:+"$ephemeral_flag"}
 
   # Start the respawn service
   _install_respawn_service "$runner_dir" "$runner_name" "$next_idx"
@@ -1812,7 +1884,11 @@ add_runner() {
     rm -f "${CONFIG_FILE}.bak"
   fi
 
-  ok "runner-${next_idx} is live (auto-respawn enabled)"
+  if [[ "$RUNNER_PERSISTENT" == true ]]; then
+    ok "runner-${next_idx} is live (persistent mode)"
+  else
+    ok "runner-${next_idx} is live (auto-respawn enabled)"
+  fi
 }
 
 # Print the interactive menu bar for bare_monitor
@@ -1853,6 +1929,8 @@ main() {
       --pat=*)    GH_PAT="${arg#*=}";;
       --count=*)  RUNNER_COUNT="${arg#*=}"; SKIP_PROMPTS=1;;
       --labels=*) RUNNER_LABELS="${arg#*=}";;
+      --persistent) RUNNER_PERSISTENT=true;;
+      --platform=*) DOCKER_PLATFORM="${arg#*=}";;
       --yes|-y)   AUTO_YES=true; SKIP_PROMPTS=1;;
       --status|-s)
         show_status
@@ -1877,11 +1955,14 @@ main() {
         echo "  --pat=TOKEN           GitHub Personal Access Token"
         echo "  --count=N             Number of parallel runners (default: 2)"
         echo "  --labels=LIST         Comma-separated runner labels"
+        echo "  --persistent          Keep runners alive across jobs (bare only; default: ephemeral)"
+        echo "  --platform=PLAT       Docker platform (e.g. linux/amd64 for x64 on ARM host)"
         echo "  --yes, -y             Skip confirmation prompt"
         echo ""
         echo "Examples:"
         echo "  actionforge --bare --org=myorg --repo=myrepo --pat=ghp_xxx --yes"
         echo "  actionforge --docker --org=myorg --count=4 --yes"
+        echo "  actionforge --docker --platform=linux/amd64 --org=myorg --yes"
         echo ""
         echo "Info:"
         echo "  --version, -v         Print version and exit"
@@ -1939,10 +2020,23 @@ main() {
   resolve_urls
 
   echo ""
+  # Warn if --persistent used with Docker (not supported)
+  if [[ "$MODE" == "docker" ]] && [[ "$RUNNER_PERSISTENT" == true ]]; then
+    warn "--persistent is only supported with --bare mode; ignoring for Docker"
+    RUNNER_PERSISTENT=false
+  fi
+
   info "Mode:    ${MODE}"
   info "Scope:   ${SCOPE}"
   info "Runners: ${RUNNER_COUNT}"
   info "Labels:  ${RUNNER_LABELS}"
+  if [[ "$MODE" == "bare" ]]; then
+    if [[ "$RUNNER_PERSISTENT" == true ]]; then
+      info "Lifecycle: persistent (stays alive across jobs)"
+    else
+      info "Lifecycle: ephemeral (re-registers after each job)"
+    fi
+  fi
   echo ""
   if [[ "$AUTO_YES" == true ]]; then
     info "Proceeding (--yes)"
