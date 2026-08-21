@@ -31,6 +31,11 @@ AF_MAX="${AF_MAX:-8}"
 AF_MIN="${AF_MIN:-1}"
 AF_INTERVAL="${AF_INTERVAL:-20}"
 AF_PROJECT="${AF_PROJECT:-}"
+# Scale UP immediately; scale DOWN only after this many consecutive ticks of
+# lower demand. Prevents the pool from oscillating (5→3→2→5…) and churning
+# runners — a scale-down removes containers by index and can tear down one that
+# just picked up a job, so we shrink lazily and only when demand is truly idle.
+AF_SCALE_DOWN_DELAY="${AF_SCALE_DOWN_DELAY:-3}"
 
 # ── GitHub API helper ────────────────────────────────────────────────────────
 af_api() {
@@ -79,30 +84,59 @@ af_scale_to() {
   docker compose ${AF_PROJECT:+-p "$AF_PROJECT"} up -d --scale runner="$1" >/dev/null 2>&1
 }
 
-# ── One reconcile step (demand → clamp → scale if changed) ───────────────────
-af_reconcile() {
-  local demand desired current
+# ── Desired count = clamp(demand). Empty on API failure. ─────────────────────
+af_desired() {
+  local demand
   demand="$(af_demand)"
   [[ -z "$demand" ]] && return 0
-  desired="$(af_clamp "$demand")"
+  af_clamp "$demand"
+}
+
+# ── One immediate reconcile (no hysteresis) — used by AF_ONCE / tests ─────────
+af_reconcile() {
+  local desired current
+  desired="$(af_desired)" || return 0
+  [[ -z "$desired" ]] && return 0
   current="$(af_current_scale)"
   if [[ "$desired" != "$current" ]]; then
-    echo "[autoscale] demand=${demand} → scale ${current} → ${desired}"
+    echo "[autoscale] demand → scale ${current} → ${desired}"
     af_scale_to "$desired"
   fi
 }
 
 # ── Main loop (skipped when sourced for tests, or AF_ONCE=1) ──────────────────
+# Scale UP on the first tick that needs it; scale DOWN only after
+# AF_SCALE_DOWN_DELAY consecutive ticks below the current count, so a transient
+# demand dip does not tear down a runner that is mid-job.
 af_main() {
   : "${GH_ORG:?GH_ORG required}"
   : "${GH_PAT:?GH_PAT required}"
-  echo "[autoscale] org=${GH_ORG} project=${AF_PROJECT:-<default>} min=${AF_MIN} max=${AF_MAX} interval=${AF_INTERVAL}s"
+  echo "[autoscale] org=${GH_ORG} project=${AF_PROJECT:-<default>} min=${AF_MIN} max=${AF_MAX} interval=${AF_INTERVAL}s down_delay=${AF_SCALE_DOWN_DELAY}"
   if [[ "${AF_ONCE:-0}" == "1" ]]; then
     af_reconcile
     return 0
   fi
+  local low_ticks=0
   while true; do
-    af_reconcile || true
+    local desired current
+    desired="$(af_desired)" || desired=""
+    if [[ -n "$desired" ]]; then
+      current="$(af_current_scale)"
+      if (( desired > current )); then
+        echo "[autoscale] scale UP ${current} → ${desired}"
+        af_scale_to "$desired"
+        low_ticks=0
+      elif (( desired < current )); then
+        low_ticks=$(( low_ticks + 1 ))
+        if (( low_ticks >= AF_SCALE_DOWN_DELAY )); then
+          echo "[autoscale] sustained low demand (${low_ticks} ticks) → scale DOWN ${current} → ${desired}"
+          af_scale_to "$desired"
+          low_ticks=0
+        fi
+      else
+        low_ticks=0
+      fi
+    fi
     sleep "$AF_INTERVAL"
   done
 }

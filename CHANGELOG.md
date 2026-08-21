@@ -2,6 +2,17 @@
 
 All notable changes to ActionForge are documented in this file.
 
+## [1.4.6] — 2026-08-21
+
+### Fixed
+- **Autoscaler no longer churns runners or disrupts running jobs.** The pool
+  could oscillate (e.g. `5→3→2→5`) as demand fluctuated, and each scale-down
+  (`docker compose --scale`) removes containers by index — occasionally tearing
+  down a runner that had just picked up a job. The autoscaler now scales **up**
+  immediately but scales **down** only after `AF_SCALE_DOWN_DELAY` consecutive
+  ticks (default 3) of lower demand, so transient dips no longer shrink the
+  pool. `desired` is still clamped to at least the busy-runner count.
+
 ## [1.4.5] — 2026-08-21
 
 ### Added
