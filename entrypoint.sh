@@ -62,6 +62,20 @@ if [[ -f .runner ]]; then
   ./config.sh remove --token "$REMOVE_TOKEN" 2>/dev/null || true
 fi
 
+# ── Clean the work directory (ephemeral clean-slate) ─────────────────────────
+# The runner registers `--ephemeral` (one job per container start), but Docker's
+# `restart: unless-stopped` RESTARTS the same container rather than recreating
+# it — so _work (checkouts, the tool cache, build output — often GBs per job)
+# would otherwise accumulate across restarts and eventually fill the host's
+# Docker disk (ENOSPC, e.g. a mid-job "no space left on device" while unpacking
+# an SDK). Wiping it on every start makes each job the clean slate the ephemeral
+# model already promises. Set ACTIONFORGE_KEEP_WORK=1 to opt out (e.g. to keep a
+# tool cache across jobs), accepting the unbounded-disk risk.
+if [[ "${ACTIONFORGE_KEEP_WORK:-0}" != "1" ]]; then
+  echo "Cleaning work directory for a clean-slate job..."
+  rm -rf _work 2>/dev/null || true
+fi
+
 # ── Register (with retry + exponential backoff) ──────────────────────────────
 MAX_RETRIES="${MAX_RETRIES:-5}"
 RETRY_DELAY=10

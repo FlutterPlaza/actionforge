@@ -2,6 +2,23 @@
 
 All notable changes to ActionForge are documented in this file.
 
+## [1.4.4] — 2026-08-21
+
+### Fixed
+- Runner disk no longer grows unbounded across jobs. The runner is ephemeral
+  (one job per container start), but `restart: unless-stopped` restarts the
+  *same* container rather than recreating it, so `_work` (checkouts, the tool
+  cache, build output — often GBs per job) accumulated across restarts and could
+  fill the host's Docker disk (`ENOSPC` mid-job, e.g. while unpacking an SDK).
+  The entrypoint now wipes `_work` on each start, making every job the clean
+  slate the ephemeral model already promises. Set `ACTIONFORGE_KEEP_WORK=1` to
+  opt out (e.g. to keep a tool cache across jobs), accepting the disk-growth
+  risk.
+
+### Changed
+- Bumped the bundled GitHub Actions runner to **2.336.0** (from 2.321.0), which
+  supports `node24`-based actions (older runners reject them).
+
 ## [1.4.3] — 2026-03-11
 
 ### Added

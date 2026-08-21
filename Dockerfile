@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Install GitHub Actions runner ────────────────────────────────────────────
-ARG RUNNER_VERSION=2.321.0
+ARG RUNNER_VERSION=2.336.0
 
 RUN useradd -m runner && \
     echo "runner ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
