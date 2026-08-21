@@ -19,8 +19,8 @@ class Actionforge < Formula
 
   # After tagging a release, update the tag in the URL and the sha256.
   # The release workflow (.github/workflows/release.yml) prints the SHA256.
-  url "https://github.com/FlutterPlaza/actionforge/archive/refs/tags/v1.4.3.tar.gz"
-  sha256 "56eb3251de09a5eac05839b61d6e8304e9a0abc5181cdeaf0c34190bd5138269"
+  url "https://github.com/FlutterPlaza/actionforge/archive/refs/tags/v1.4.4.tar.gz"
+  sha256 "005ac15811beca7e0e9f6d004f575eb21e2121865ad9a0dba7c7a3aaca3a7b97"
   license "BSD-3-Clause"
 
   depends_on "jq"
