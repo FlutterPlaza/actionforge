@@ -32,12 +32,16 @@ set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
 
-ACTIONFORGE_VERSION="1.4.4"
+ACTIONFORGE_VERSION="1.4.5"
 RUNNER_VERSION="2.336.0"
 CONFIG_FILE="$HOME/.actionforge.conf"
 ACTIONFORGE_WORKDIR="$HOME/.actionforge"
 RUNNER_PERSISTENT=false
 DOCKER_PLATFORM=""
+AUTOSCALE=false
+AUTOSCALE_MAX="8"
+AUTOSCALE_MIN="1"
+AUTOSCALE_INTERVAL="20"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 info()  { echo -e "${BLUE}ℹ ${NC} $*"; }
@@ -1056,7 +1060,7 @@ install_docker_mode() {
   mkdir -p "$ACTIONFORGE_WORKDIR"
 
   # Copy Docker files to working directory
-  for f in Dockerfile docker-compose.yml entrypoint.sh; do
+  for f in Dockerfile docker-compose.yml entrypoint.sh autoscale.sh; do
     if [[ -f "${kit_dir}/${f}" ]]; then
       cp "${kit_dir}/${f}" "$ACTIONFORGE_WORKDIR/"
     else
@@ -1093,6 +1097,24 @@ EOF
   docker compose up -d --scale runner="${RUNNER_COUNT}"
 
   ok "Runners are live! Check status with: docker compose ps"
+
+  if [[ "${AUTOSCALE}" == "true" ]]; then
+    # Stop a prior autoscaler for this workdir, then launch a fresh one that
+    # polls demand and scales the pool between AUTOSCALE_MIN and AUTOSCALE_MAX.
+    # Runs from ACTIONFORGE_WORKDIR so it targets the same compose project.
+    if [[ -f "${ACTIONFORGE_WORKDIR}/autoscale.pid" ]]; then
+      kill "$(cat "${ACTIONFORGE_WORKDIR}/autoscale.pid")" 2>/dev/null || true
+      rm -f "${ACTIONFORGE_WORKDIR}/autoscale.pid"
+    fi
+    info "Starting autoscaler (min=${AUTOSCALE_MIN} max=${AUTOSCALE_MAX} interval=${AUTOSCALE_INTERVAL}s)..."
+    GH_ORG="${GH_ORG}" GH_PAT="${GH_PAT}" \
+      AF_MIN="${AUTOSCALE_MIN}" AF_MAX="${AUTOSCALE_MAX}" AF_INTERVAL="${AUTOSCALE_INTERVAL}" \
+      nohup bash "${ACTIONFORGE_WORKDIR}/autoscale.sh" \
+      >> "${ACTIONFORGE_WORKDIR}/autoscale.log" 2>&1 &
+    echo $! > "${ACTIONFORGE_WORKDIR}/autoscale.pid"
+    ok "Autoscaler running (pid $(cat "${ACTIONFORGE_WORKDIR}/autoscale.pid")); logs: ${ACTIONFORGE_WORKDIR}/autoscale.log"
+    echo "  Stop it with: kill \$(cat ${ACTIONFORGE_WORKDIR}/autoscale.pid)  (or 'actionforge --teardown')"
+  fi
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1100,6 +1122,13 @@ EOF
 # ══════════════════════════════════════════════════════════════════════════════
 teardown() {
   warn "Tearing down all runners on this machine..."
+
+  # Stop the autoscaler daemon, if one is running for this workdir.
+  if [[ -f "${ACTIONFORGE_WORKDIR}/autoscale.pid" ]]; then
+    kill "$(cat "${ACTIONFORGE_WORKDIR}/autoscale.pid")" 2>/dev/null || true
+    rm -f "${ACTIONFORGE_WORKDIR}/autoscale.pid"
+    ok "Autoscaler stopped"
+  fi
 
   # Docker runners (check working directory first, then script directory)
   if [[ -f "${ACTIONFORGE_WORKDIR}/docker-compose.yml" ]]; then
@@ -1930,6 +1959,10 @@ main() {
       --count=*)  RUNNER_COUNT="${arg#*=}"; SKIP_PROMPTS=1;;
       --labels=*) RUNNER_LABELS="${arg#*=}";;
       --persistent) RUNNER_PERSISTENT=true;;
+      --autoscale) AUTOSCALE=true;;
+      --max=*)    AUTOSCALE_MAX="${arg#*=}"; AUTOSCALE=true;;
+      --min=*)    AUTOSCALE_MIN="${arg#*=}"; AUTOSCALE=true;;
+      --interval=*) AUTOSCALE_INTERVAL="${arg#*=}";;
       --platform=*) DOCKER_PLATFORM="${arg#*=}";;
       --yes|-y)   AUTO_YES=true; SKIP_PROMPTS=1;;
       --status|-s)
@@ -1959,9 +1992,16 @@ main() {
         echo "  --platform=PLAT       Docker platform (e.g. linux/amd64 for x64 on ARM host)"
         echo "  --yes, -y             Skip confirmation prompt"
         echo ""
+        echo "Autoscaling (Docker mode; scales the pool to match the queue):"
+        echo "  --autoscale           Scale runners up/down with demand (org-wide)"
+        echo "  --max=N               Max runners when autoscaling (default: 8)"
+        echo "  --min=N               Min runners when autoscaling (default: 1)"
+        echo "  --interval=SECONDS    Poll interval (default: 20)"
+        echo ""
         echo "Examples:"
         echo "  actionforge --bare --org=myorg --repo=myrepo --pat=ghp_xxx --yes"
         echo "  actionforge --docker --org=myorg --count=4 --yes"
+        echo "  actionforge --docker --org=myorg --autoscale --max=8 --yes"
         echo "  actionforge --docker --platform=linux/amd64 --org=myorg --yes"
         echo ""
         echo "Info:"

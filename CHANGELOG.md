@@ -2,6 +2,19 @@
 
 All notable changes to ActionForge are documented in this file.
 
+## [1.4.5] — 2026-08-21
+
+### Added
+- **Queue-based autoscaling** (Docker mode): `--autoscale` scales the runner
+  pool up and down to match GitHub Actions demand, between `--min` (default 1)
+  and `--max` (default 8), with `--interval` (default 20s). A host-side poll
+  loop (`autoscale.sh`) counts the self-hosted jobs in flight — busy runners
+  plus queued runs on the org's private repos — and adjusts
+  `docker compose --scale runner=N` each tick. Since runners are ephemeral,
+  scaling down just drops idle replicas; in-progress jobs finish via the
+  compose grace period. The daemon writes a pid/log to `~/.actionforge/` and is
+  stopped by `actionforge --teardown`.
+
 ## [1.4.4] — 2026-08-21
 
 ### Fixed
